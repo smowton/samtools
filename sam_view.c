@@ -32,6 +32,7 @@ DEALINGS IN THE SOFTWARE.  */
 #include <stdbool.h>
 #include <assert.h>
 #include "htslib/sam.h"
+#include "htslib/bgzf.h"
 #include "htslib/faidx.h"
 #include "htslib/kstring.h"
 #include "htslib/khash.h"
@@ -227,7 +228,7 @@ static void check_sam_close(samFile *fp, const char *fname, const char *null_fna
 int main_samview(int argc, char *argv[])
 {
     int c, is_header = 0, is_header_only = 0, ret = 0, compress_level = -1, is_count = 0;
-    int is_long_help = 0, n_threads = 0;
+    int is_long_help = 0, n_threads = 0, n_input_threads = 0;
     int64_t count = 0;
     samFile *in = 0, *out = 0, *un_out=0;
     bam_hdr_t *header = NULL;
@@ -249,7 +250,7 @@ int main_samview(int argc, char *argv[])
     /* parse command-line options */
     /* TODO: convert this to getopt_long we're running out of letters */
     strcpy(out_mode, "w");
-    while ((c = getopt(argc, argv, "SbBcCt:h1Ho:q:f:F:ul:r:?T:R:L:s:@:m:x:U:")) >= 0) {
+    while ((c = getopt(argc, argv, "SbBcCt:h1Ho:q:f:F:ul:r:?T:R:L:s:@:m:x:U:i:")) >= 0) {
         switch (c) {
         case 's':
             if ((settings.subsam_seed = strtol(optarg, &q, 10)) != 0) {
@@ -301,6 +302,7 @@ int main_samview(int argc, char *argv[])
         case 'T': fn_ref = strdup(optarg); break;
         case 'B': settings.remove_B = 1; break;
         case '@': n_threads = strtol(optarg, 0, 0); break;
+	case 'i': n_input_threads = strtol(optarg, 0, 0); break;
         case 'x':
             {
                 if (strlen(optarg) != 2) {
@@ -364,6 +366,12 @@ int main_samview(int argc, char *argv[])
         }
     }
     if (n_threads > 1) { if (out) hts_set_threads(out, n_threads); }
+    if (n_input_threads > 1 && in && in->is_bin) 
+    { 
+	hts_set_threads(in, n_input_threads);
+	bgzf_set_cache_size(in->fp.bgzf, BGZF_MAX_BLOCK_SIZE * n_input_threads * 256);
+    }
+
     if (is_header_only) goto view_end; // no need to print alignments
 
     if (argc == optind + 1) { // convert/print the entire file
